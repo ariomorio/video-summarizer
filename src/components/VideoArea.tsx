@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Upload, FileVideo, Loader2, X, Download } from "lucide-react";
+import { Upload, FileVideo, Loader2, X, Download, Zap, Server } from "lucide-react";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile, toBlobURL } from "@ffmpeg/util";
 import { summarizeVideoAudio } from "../lib/gemini";
@@ -12,6 +12,8 @@ interface VideoAreaProps {
     onSummaryGenerated: (summary: string) => void;
 }
 
+type ProcessingMode = 'auto' | 'server' | 'client';
+
 export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps) {
     const [file, setFile] = useState<File | null>(null);
     const [status, setStatus] = useState<string>("");
@@ -19,10 +21,12 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
     const [progress, setProgress] = useState(0);
     const [hasError, setHasError] = useState(false);
     const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+    const [processingMode, setProcessingMode] = useState<ProcessingMode>('auto');
+    const [compressionInfo, setCompressionInfo] = useState<string>("");
     const ffmpegRef = useRef<FFmpeg | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const load = async () => {
+    const loadClientFFmpeg = async () => {
         const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
 
         if (!ffmpegRef.current) {
@@ -30,17 +34,15 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
         }
         const ffmpeg = ffmpegRef.current;
 
-        // Check if already loaded to avoid errors
         if (ffmpeg.loaded) return;
 
-        setStatus("FFmpegを読み込み中...");
+        setStatus("FFmpegを読み込み中（ブラウザ版）...");
         await ffmpeg.load({
             coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
             wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
         });
     };
 
-    // Warn user before closing browser during processing
     useEffect(() => {
         if (isProcessing) {
             const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -56,6 +58,7 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
             setFile(e.target.files[0]);
+            setCompressionInfo("");
         }
     };
 
@@ -63,46 +66,176 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
         e.preventDefault();
         if (e.dataTransfer.files && e.dataTransfer.files[0]) {
             setFile(e.dataTransfer.files[0]);
+            setCompressionInfo("");
+        }
+    };
+
+    // Server-side audio extraction (faster, better compression)
+    const extractAudioServer = async (videoFile: File): Promise<{ audio: string; mimeType: string; needsFileAPI: boolean }> => {
+        setStatus("サーバーで音声抽出中（高速モード）...");
+
+        const formData = new FormData();
+        formData.append('file', videoFile);
+
+        const response = await fetch('/api/extract-audio', {
+            method: 'POST',
+            body: formData,
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            if (data.fallbackToClient) {
+                throw new Error('FALLBACK_TO_CLIENT');
+            }
+            throw new Error(data.error || '音声抽出に失敗しました');
+        }
+
+        setCompressionInfo(`圧縮率: ${data.compressionRatio}% (${data.fileSizeMB}MB)`);
+
+        return {
+            audio: data.audio,
+            mimeType: data.mimeType,
+            needsFileAPI: data.needsFileAPI,
+        };
+    };
+
+    // Client-side audio extraction (fallback)
+    const extractAudioClient = async (videoFile: File): Promise<{ audio: string; mimeType: string; needsFileAPI: boolean }> => {
+        await loadClientFFmpeg();
+        const ffmpeg = ffmpegRef.current;
+        if (!ffmpeg) throw new Error("FFmpeg not initialized");
+
+        setStatus("音声を抽出中（ブラウザ版）...");
+        await ffmpeg.writeFile('input.mp4', await fetchFile(videoFile));
+
+        // Use aggressive compression for speech
+        await ffmpeg.exec([
+            '-i', 'input.mp4',
+            '-vn',
+            '-ac', '1',           // mono
+            '-ar', '16000',       // 16kHz sample rate
+            '-b:a', '64k',        // 64kbps bitrate
+            '-f', 'mp3',
+            'output.mp3'
+        ]);
+
+        setStatus("音声ファイルを読み込み中...");
+        const data = await ffmpeg.readFile('output.mp3');
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const extractedAudioBlob = new Blob([data as any], { type: 'audio/mp3' });
+        setAudioBlob(extractedAudioBlob);
+
+        // Convert to base64
+        const base64 = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+            reader.readAsDataURL(extractedAudioBlob);
+        });
+
+        const fileSizeMB = extractedAudioBlob.size / (1024 * 1024);
+        setCompressionInfo(`圧縮後: ${fileSizeMB.toFixed(2)}MB`);
+
+        return {
+            audio: base64,
+            mimeType: 'audio/mp3',
+            needsFileAPI: fileSizeMB > 15,
+        };
+    };
+
+    // Summarize using Gemini (inline data or File API)
+    const summarizeWithGemini = async (audio: string, mimeType: string, needsFileAPI: boolean): Promise<string> => {
+        if (needsFileAPI) {
+            // Use Gemini File API for large files
+            setStatus("Gemini File APIで分析中（大容量ファイル対応）...");
+
+            const response = await fetch('/api/gemini-file', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    audio,
+                    mimeType,
+                    apiKey,
+                }),
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || 'Gemini処理に失敗しました');
+            }
+
+            return data.summary;
+        } else {
+            // Use inline data for smaller files
+            setStatus("Gemini AIで分析中...");
+
+            // Create a File object from base64
+            const binaryString = atob(audio);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            const audioFile = new File([bytes], "audio.mp3", { type: mimeType });
+
+            return await summarizeVideoAudio(apiKey, audioFile, (s) => setStatus(s));
         }
     };
 
     const processVideo = async () => {
         if (!file || !apiKey) return;
         setIsProcessing(true);
-        setProgress(10);
+        setProgress(5);
         setHasError(false);
+        setCompressionInfo("");
 
         try {
-            await load();
-            const ffmpeg = ffmpegRef.current;
-            if (!ffmpeg) throw new Error("FFmpeg not initialized");
+            let audioData: { audio: string; mimeType: string; needsFileAPI: boolean };
 
-            setStatus("音声を抽出中...");
-            await ffmpeg.writeFile('input.mp4', await fetchFile(file));
+            // Try server-side first (faster), fallback to client
+            if (processingMode === 'auto' || processingMode === 'server') {
+                try {
+                    setProgress(10);
+                    audioData = await extractAudioServer(file);
+                    setProgress(50);
+                } catch (error) {
+                    if ((error as Error).message === 'FALLBACK_TO_CLIENT' || processingMode === 'auto') {
+                        console.log('Falling back to client-side processing...');
+                        setProgress(10);
+                        audioData = await extractAudioClient(file);
+                        setProgress(50);
 
-            await ffmpeg.exec(['-i', 'input.mp4', '-vn', '-acodec', 'libmp3lame', 'output.mp3']);
+                        // Save audio blob for download
+                        const binaryString = atob(audioData.audio);
+                        const bytes = new Uint8Array(binaryString.length);
+                        for (let i = 0; i < binaryString.length; i++) {
+                            bytes[i] = binaryString.charCodeAt(i);
+                        }
+                        setAudioBlob(new Blob([bytes], { type: 'audio/mp3' }));
+                    } else {
+                        throw error;
+                    }
+                }
+            } else {
+                setProgress(10);
+                audioData = await extractAudioClient(file);
+                setProgress(50);
+            }
 
-            setStatus("音声ファイルを読み込み中...");
-            const data = await ffmpeg.readFile('output.mp3');
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const extractedAudioBlob = new Blob([data as any], { type: 'audio/mp3' });
-            const audioFile = new File([extractedAudioBlob], "audio.mp3", { type: "audio/mp3" });
-            
-            // Save audio blob for download
-            setAudioBlob(extractedAudioBlob);
+            // Summarize with Gemini
+            setProgress(60);
+            const summary = await summarizeWithGemini(
+                audioData.audio,
+                audioData.mimeType,
+                audioData.needsFileAPI
+            );
 
-            setProgress(50);
-            setStatus("Gemini AIで分析中...");
-
-            const summary = await summarizeVideoAudio(apiKey, audioFile, (s) => setStatus(s));
             onSummaryGenerated(summary);
             setProgress(100);
             setStatus("完了！");
 
             // Save to history
-            if (file) {
-                saveToHistory(file.name, summary);
-            }
+            saveToHistory(file.name, summary);
+
         } catch (error) {
             console.error(error);
             setStatus("エラー: " + (error as Error).message);
@@ -130,14 +263,55 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
 
         localStorage.setItem("summary_history", JSON.stringify(history));
 
-        // Dispatch custom event to update sidebar
         if (typeof window !== 'undefined') {
-            window.dispatchEvent(new Event('storage')); // Simple trigger, or could be more specific
+            window.dispatchEvent(new Event('storage'));
         }
     };
 
     return (
         <div className="space-y-6">
+            {/* Processing Mode Selector */}
+            <div className="flex items-center justify-end gap-2">
+                <span className="text-xs text-gray-500">処理モード:</span>
+                <div className="flex bg-gray-100 p-1 rounded-lg">
+                    <button
+                        onClick={() => setProcessingMode('auto')}
+                        className={`px-3 py-1 rounded text-xs font-medium transition-all ${
+                            processingMode === 'auto'
+                                ? 'bg-white text-gray-900 shadow-sm'
+                                : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                        title="サーバー優先、失敗時はブラウザで処理"
+                    >
+                        <Zap size={12} className="inline mr-1" />
+                        自動
+                    </button>
+                    <button
+                        onClick={() => setProcessingMode('server')}
+                        className={`px-3 py-1 rounded text-xs font-medium transition-all ${
+                            processingMode === 'server'
+                                ? 'bg-white text-green-600 shadow-sm'
+                                : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                        title="サーバーで高速処理（FFmpeg必要）"
+                    >
+                        <Server size={12} className="inline mr-1" />
+                        高速
+                    </button>
+                    <button
+                        onClick={() => setProcessingMode('client')}
+                        className={`px-3 py-1 rounded text-xs font-medium transition-all ${
+                            processingMode === 'client'
+                                ? 'bg-white text-blue-600 shadow-sm'
+                                : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                        title="ブラウザ内で処理（サーバー不要）"
+                    >
+                        ブラウザ
+                    </button>
+                </div>
+            </div>
+
             {/* Processing Warning Banner */}
             <AnimatePresence>
                 {isProcessing && (
@@ -151,7 +325,8 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
                         <div className="flex-1">
                             <p className="text-sm font-semibold text-gray-900">処理中です</p>
                             <p className="text-xs text-gray-600 mt-1">
-                                ブラウザを閉じたり、ページを離れると処理が中断されます。完了までお待ちください。
+                                {compressionInfo && <span className="text-green-600 font-medium">{compressionInfo} • </span>}
+                                ブラウザを閉じたり、ページを離れると処理が中断されます。
                             </p>
                         </div>
                     </motion.div>
@@ -178,7 +353,7 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
                     <p className="text-gray-900 font-bold text-lg mb-2">動画をアップロード</p>
                     <p className="text-sm text-gray-500">
                         クリックまたはドラッグ＆ドロップ<br />
-                        <span className="text-xs text-gray-400 mt-2 block">MP4, MOV, AVI (最大 2GB)</span>
+                        <span className="text-xs text-gray-400 mt-2 block">MP4, MOV, AVI (最大 2GB) • 大容量ファイル対応</span>
                     </p>
                 </div>
             ) : (
@@ -190,7 +365,14 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
                             </div>
                             <div>
                                 <p className="font-medium text-gray-900 truncate max-w-xs">{file.name}</p>
-                                <p className="text-xs text-gray-500">{(file.size / (1024 * 1024)).toFixed(2)} MB</p>
+                                <p className="text-xs text-gray-500">
+                                    {(file.size / (1024 * 1024)).toFixed(2)} MB
+                                    {file.size > 100 * 1024 * 1024 && (
+                                        <span className="ml-2 text-orange-500 font-medium">
+                                            (大容量 - File API使用)
+                                        </span>
+                                    )}
+                                </p>
                             </div>
                         </div>
                         <div className="flex gap-2">
@@ -217,6 +399,7 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
                                     setProgress(0);
                                     setStatus("");
                                     setAudioBlob(null);
+                                    setCompressionInfo("");
                                 }}
                                 className="p-2 hover:bg-gray-200 rounded-full text-gray-500 transition-colors"
                             >
@@ -268,6 +451,9 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
                                     transition={{ duration: 0.5 }}
                                 />
                             </div>
+                            {compressionInfo && (
+                                <p className="text-xs text-green-600 text-center">{compressionInfo}</p>
+                            )}
                         </div>
                     )}
                 </div>

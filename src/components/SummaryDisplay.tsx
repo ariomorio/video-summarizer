@@ -5,12 +5,14 @@ import rehypeRaw from 'rehype-raw';
 import { Copy, Check } from "lucide-react";
 import { useState } from 'react';
 import { motion } from 'framer-motion';
+import ExportButtons from './ExportButtons';
 
 interface SummaryDisplayProps {
     markdown: string;
+    filename?: string;
 }
 
-export default function SummaryDisplay({ markdown }: SummaryDisplayProps) {
+export default function SummaryDisplay({ markdown, filename }: SummaryDisplayProps) {
     const [copied, setCopied] = useState(false);
 
     const handleCopy = () => {
@@ -42,6 +44,9 @@ export default function SummaryDisplay({ markdown }: SummaryDisplayProps) {
                 <div className="p-8 prose prose-slate max-w-none prose-headings:text-gray-800 prose-p:text-gray-600 prose-li:text-gray-600">
                     <ReactMarkdown rehypePlugins={[rehypeRaw]}>{markdown}</ReactMarkdown>
                 </div>
+
+                {/* Export Buttons */}
+                <ExportButtons markdown={markdown} filename={filename || "summary"} />
             </div>
         </motion.div>
     );
