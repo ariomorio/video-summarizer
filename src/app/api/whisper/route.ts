@@ -37,8 +37,12 @@ export async function POST(request: NextRequest) {
 
     } catch (error) {
         console.error('Whisper transcription error:', error);
+        const msg = (error as Error).message || '';
+        const safeMessage = msg.includes('API key') || msg.includes('quota') || msg.includes('Incorrect')
+            ? 'APIキーが無効です。設定を確認してください。'
+            : '文字起こし処理中にエラーが発生しました。しばらく待ってから再試行してください。';
         return NextResponse.json(
-            { error: `文字起こしエラー: ${(error as Error).message}` },
+            { error: safeMessage },
             { status: 500 }
         );
     }

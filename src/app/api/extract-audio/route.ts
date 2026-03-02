@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { writeFile, unlink, readFile, stat } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
+const ALLOWED_MIMES = [
+    'video/mp4', 'video/quicktime', 'video/x-msvideo',
+    'video/webm', 'video/x-matroska', 'video/mpeg',
+];
 
 export async function POST(request: NextRequest) {
     const tempFiles: string[] = [];
@@ -19,6 +25,22 @@ export async function POST(request: NextRequest) {
             return NextResponse.json(
                 { error: 'ファイルが必要です' },
                 { status: 400 }
+            );
+        }
+
+        // File size validation
+        if (file.size > MAX_FILE_SIZE) {
+            return NextResponse.json(
+                { error: 'ファイルサイズが上限（2GB）を超えています' },
+                { status: 413 }
+            );
+        }
+
+        // MIME type validation
+        if (file.type && !ALLOWED_MIMES.includes(file.type)) {
+            return NextResponse.json(
+                { error: '対応していないファイル形式です。MP4, MOV, AVI, WebM, MKV形式に対応しています。' },
+                { status: 415 }
             );
         }
 
@@ -35,9 +57,12 @@ export async function POST(request: NextRequest) {
         // Get input file duration for progress estimation
         let duration = 0;
         try {
-            const { stdout } = await execAsync(
-                `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${inputPath}"`
-            );
+            const { stdout } = await execFileAsync('ffprobe', [
+                '-v', 'error',
+                '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                inputPath
+            ]);
             duration = parseFloat(stdout.trim()) || 0;
         } catch {
             // Duration detection failed, continue anyway
@@ -45,12 +70,11 @@ export async function POST(request: NextRequest) {
 
         // Extract audio with aggressive compression for speech
         // 64kbps mono is enough for speech recognition
-        // -ac 1: mono channel
-        // -ar 16000: 16kHz sample rate (optimal for speech)
-        // -b:a 64k: 64kbps bitrate
-        const ffmpegCmd = `ffmpeg -i "${inputPath}" -vn -ac 1 -ar 16000 -b:a 64k -f mp3 "${outputPath}" -y`;
-
-        await execAsync(ffmpegCmd, { timeout: 300000 }); // 5 min timeout
+        await execFileAsync('ffmpeg', [
+            '-i', inputPath,
+            '-vn', '-ac', '1', '-ar', '16000',
+            '-b:a', '64k', '-f', 'mp3', outputPath, '-y'
+        ], { timeout: 300000 }); // 5 min timeout
 
         // Read the output file
         const audioBuffer = await readFile(outputPath);
@@ -94,15 +118,15 @@ export async function POST(request: NextRequest) {
         console.error('Audio extraction error:', error);
 
         // Check if FFmpeg is not installed
-        if ((error as Error).message?.includes('ffmpeg')) {
+        if ((error as Error).message?.includes('ENOENT')) {
             return NextResponse.json(
-                { error: 'FFmpegがインストールされていません。サーバーにFFmpegをインストールしてください。', fallbackToClient: true },
+                { error: 'サーバーの音声処理環境が利用できません。クライアント側での処理にフォールバックします。', fallbackToClient: true },
                 { status: 500 }
             );
         }
 
         return NextResponse.json(
-            { error: `音声抽出エラー: ${(error as Error).message}`, fallbackToClient: true },
+            { error: '音声抽出中にエラーが発生しました。しばらく待ってから再試行してください。', fallbackToClient: true },
             { status: 500 }
         );
     }

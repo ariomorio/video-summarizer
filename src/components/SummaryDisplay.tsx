@@ -2,6 +2,7 @@
 
 import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
 import { Copy, Check } from "lucide-react";
 import { useState } from 'react';
 import { motion } from 'framer-motion';
@@ -42,7 +43,7 @@ export default function SummaryDisplay({ markdown, filename }: SummaryDisplayPro
                 </div>
 
                 <div className="p-8 prose prose-slate max-w-none prose-headings:text-gray-800 prose-p:text-gray-600 prose-li:text-gray-600">
-                    <ReactMarkdown rehypePlugins={[rehypeRaw]}>{markdown}</ReactMarkdown>
+                    <ReactMarkdown rehypePlugins={[rehypeRaw, rehypeSanitize]}>{markdown}</ReactMarkdown>
                 </div>
 
                 {/* Export Buttons */}

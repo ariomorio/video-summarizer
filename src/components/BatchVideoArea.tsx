@@ -8,6 +8,7 @@ import { summarizeVideoAudio } from "../lib/gemini";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
+import rehypeSanitize from "rehype-sanitize";
 
 interface VideoJob {
     id: string;
@@ -430,7 +431,7 @@ export default function BatchVideoArea({ apiKey }: BatchVideoAreaProps) {
                                     {job.status === "completed" && job.isExpanded && job.summary && (
                                         <div className="p-5 border-t border-gray-100 bg-gray-50/30">
                                             <div className="bg-white rounded-xl border border-gray-100 p-4 max-h-60 overflow-y-auto text-sm prose prose-orange prose-sm max-w-none">
-                                                <ReactMarkdown rehypePlugins={[rehypeRaw]}>{job.summary}</ReactMarkdown>
+                                                <ReactMarkdown rehypePlugins={[rehypeRaw, rehypeSanitize]}>{job.summary}</ReactMarkdown>
                                             </div>
                                             <div className="flex justify-end gap-2 mt-3">
                                                 {job.audioBlob && (
