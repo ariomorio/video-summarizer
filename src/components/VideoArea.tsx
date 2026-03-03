@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Upload, FileVideo, Loader2, X, Download, Zap, Server } from "lucide-react";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
-import { fetchFile } from "@ffmpeg/util";
+import { fetchFile, toBlobURL } from "@ffmpeg/util";
 import { summarizeVideoAudio, summarizeAudioChunks } from "../lib/gemini";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -36,11 +36,10 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
 
         try {
             setStatus("FFmpegを読み込み中（ブラウザ版）...");
-            // Load from local public directory with direct URLs (no toBlobURL needed for same-origin)
-            await ffmpeg.load({
-                coreURL: '/ffmpeg/ffmpeg-core.js',
-                wasmURL: '/ffmpeg/ffmpeg-core.wasm',
-            });
+            // Load from local public directory via toBlobURL (same-origin, COEP removed so fetch works)
+            const coreURL = await toBlobURL('/ffmpeg/ffmpeg-core.js', 'text/javascript');
+            const wasmURL = await toBlobURL('/ffmpeg/ffmpeg-core.wasm', 'application/wasm');
+            await ffmpeg.load({ coreURL, wasmURL });
         } catch (e) {
             console.error('FFmpeg load error:', e);
             throw new Error(`FFmpeg読み込み失敗: ${e instanceof Error ? e.message : String(e)}`);

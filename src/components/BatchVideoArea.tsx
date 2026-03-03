@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Upload, FolderOpen, Loader2, CheckCircle, XCircle, ChevronDown, ChevronRight, Download, FileVideo } from "lucide-react";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
-import { fetchFile } from "@ffmpeg/util";
+import { fetchFile, toBlobURL } from "@ffmpeg/util";
 import { summarizeVideoAudio, summarizeAudioChunks } from "../lib/gemini";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
@@ -40,10 +40,10 @@ export default function BatchVideoArea({ apiKey }: BatchVideoAreaProps) {
 
         if (ffmpeg.loaded) return;
 
-        // Load from local public directory with direct URLs
+        // Load from local public directory via toBlobURL (same-origin, COEP removed so fetch works)
         await ffmpeg.load({
-            coreURL: '/ffmpeg/ffmpeg-core.js',
-            wasmURL: '/ffmpeg/ffmpeg-core.wasm',
+            coreURL: await toBlobURL('/ffmpeg/ffmpeg-core.js', 'text/javascript'),
+            wasmURL: await toBlobURL('/ffmpeg/ffmpeg-core.wasm', 'application/wasm'),
         });
     };
 
