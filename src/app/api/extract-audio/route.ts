@@ -14,12 +14,15 @@ const ALLOWED_MIMES = [
     'video/webm', 'video/x-matroska', 'video/mpeg',
 ];
 
+const CHUNK_SECONDS = 600; // 10 minutes
+
 export async function POST(request: NextRequest) {
     const tempFiles: string[] = [];
 
     try {
         const formData = await request.formData();
         const file = formData.get('file') as File;
+        const chunked = formData.get('chunked') === 'true';
 
         if (!file) {
             return NextResponse.json(
@@ -32,6 +35,14 @@ export async function POST(request: NextRequest) {
         if (file.size > MAX_FILE_SIZE) {
             return NextResponse.json(
                 { error: 'ファイルサイズが上限（2GB）を超えています' },
+                { status: 413 }
+            );
+        }
+
+        // Reject files > 500MB on server (Vercel memory limit)
+        if (file.size > 500 * 1024 * 1024) {
+            return NextResponse.json(
+                { error: 'ファイルが大きすぎます（500MB以上）。ブラウザ側で処理してください。', fallbackToClient: true },
                 { status: 413 }
             );
         }
@@ -54,7 +65,7 @@ export async function POST(request: NextRequest) {
         const buffer = Buffer.from(await file.arrayBuffer());
         await writeFile(inputPath, buffer);
 
-        // Get input file duration for progress estimation
+        // Get input file duration
         let duration = 0;
         try {
             const { stdout } = await execFileAsync('ffprobe', [
@@ -76,18 +87,60 @@ export async function POST(request: NextRequest) {
             '-b:a', '64k', '-f', 'mp3', outputPath, '-y'
         ], { timeout: 300000 }); // 5 min timeout
 
-        // Read the output file
-        const audioBuffer = await readFile(outputPath);
         const audioStats = await stat(outputPath);
         const fileSizeMB = audioStats.size / (1024 * 1024);
 
+        // Chunked mode: split audio into 10-minute segments
+        if (chunked && duration > CHUNK_SECONDS) {
+            const numChunks = Math.ceil(duration / CHUNK_SECONDS);
+            const chunks: { base64: string; mimeType: string; startTime: number; duration: number }[] = [];
+
+            for (let i = 0; i < numChunks; i++) {
+                const startTime = i * CHUNK_SECONDS;
+                const chunkDuration = Math.min(CHUNK_SECONDS, duration - startTime);
+                const chunkPath = join(tmpdir(), `chunk_${uuid}_${i}.mp3`);
+                tempFiles.push(chunkPath);
+
+                await execFileAsync('ffmpeg', [
+                    '-ss', String(startTime),
+                    '-t', String(CHUNK_SECONDS),
+                    '-i', outputPath,
+                    '-c', 'copy', chunkPath, '-y'
+                ], { timeout: 60000 });
+
+                const chunkBuffer = await readFile(chunkPath);
+                chunks.push({
+                    base64: chunkBuffer.toString('base64'),
+                    mimeType: 'audio/mp3',
+                    startTime,
+                    duration: chunkDuration,
+                });
+            }
+
+            // Clean up temp files
+            for (const tempFile of tempFiles) {
+                try { await unlink(tempFile); } catch { /* ignore */ }
+            }
+
+            return NextResponse.json({
+                success: true,
+                chunked: true,
+                chunks,
+                originalSize: file.size,
+                compressedSize: audioStats.size,
+                compressionRatio: ((1 - audioStats.size / file.size) * 100).toFixed(1),
+                duration,
+                fileSizeMB: fileSizeMB.toFixed(2),
+                numChunks,
+            });
+        }
+
+        // Single mode (existing behavior)
+        const audioBuffer = await readFile(outputPath);
+
         // Clean up temp files
         for (const tempFile of tempFiles) {
-            try {
-                await unlink(tempFile);
-            } catch {
-                // Ignore cleanup errors
-            }
+            try { await unlink(tempFile); } catch { /* ignore */ }
         }
 
         // Convert to base64
@@ -95,6 +148,7 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({
             success: true,
+            chunked: false,
             audio: base64Audio,
             mimeType: 'audio/mp3',
             originalSize: file.size,
@@ -102,17 +156,13 @@ export async function POST(request: NextRequest) {
             compressionRatio: ((1 - audioStats.size / file.size) * 100).toFixed(1),
             duration,
             fileSizeMB: fileSizeMB.toFixed(2),
-            needsFileAPI: fileSizeMB > 15, // Flag if file is large
+            needsFileAPI: fileSizeMB > 15,
         });
 
     } catch (error) {
         // Clean up temp files on error
         for (const tempFile of tempFiles) {
-            try {
-                await unlink(tempFile);
-            } catch {
-                // Ignore cleanup errors
-            }
+            try { await unlink(tempFile); } catch { /* ignore */ }
         }
 
         console.error('Audio extraction error:', error);
@@ -131,5 +181,3 @@ export async function POST(request: NextRequest) {
         );
     }
 }
-
-// Next.js 13+ App Router handles body parsing automatically for formData

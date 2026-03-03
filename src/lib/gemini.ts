@@ -1,5 +1,189 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
+// Default prompt — blog-style writing that people actually read to the end
+function getDefaultPrompt(): string {
+    return `あなたは「読まれるブログ記事」を書くプロのライターです。
+提供された音声を聞いて、その内容を **ブログ記事** として書き起こしてください。
+
+ゴールは2つです。
+1. **最後まで読めるもの** にすること
+2. **動画を見なくても、次に何をすればいいかわかる** こと
+
+単なる要約ではありません。
+「読ませるライティング」「行動まで促すライティング」を意識してください。
+
+---
+
+# 書き方のルール（すべてのパターン共通）
+
+**文体**
+- 読者に語りかけるように書く（「ですます調」でOK。堅すぎず、くだけすぎず）
+- 1文は短く。1〜2行で改行する
+- 段落も短く。2〜3文ごとに空行を入れる
+- スマホで読んでも疲れない見た目にする
+
+**強調の使い方**
+- 大事なフレーズは **太字** にして、流し読みでも要点がわかるようにする
+- 特に伝えたいメッセージは、前後に空行を置いて独立させる
+
+**引用ブロックの使い方**
+- 「これだけは覚えて」というポイントや名言的なフレーズは > 引用ブロック で目立たせる
+
+**禁止事項**
+- 「〜と述べていました」「〜とのことです」は使わない
+- 箇条書きだけで埋めない。文章として読める形にする
+- 音声で話されていない内容は書かない
+- 記号の乱用はしない（[]、：、★、■ などは使わない）
+
+---
+
+# パターン判定
+
+音声を聞いて、以下のどちらに近いかを判断してください。
+
+- **講義・セミナー型** → 一人の講師が教えている内容 → パターンA
+- **グループコンサル型** → 質疑応答や個別相談が中心の内容 → パターンB
+
+---
+
+# パターンA 講義・セミナーの場合
+
+以下の構成で、ブログ記事として書いてください。
+
+---
+
+## （音声の内容にふさわしいタイトル）
+
+冒頭の1〜2文で、この講義が「何について」「誰向けに」話しているかを伝える導入文を書く。
+読者が「自分に関係ある」と思えるような書き出しにする。
+
+---
+
+## この講義のポイント
+
+ここでは3つのポイントを、それぞれ **太字のキーフレーズ＋1行の補足** で書く。
+
+箇条書きでOKだが、ただ並べるのではなく、読者の関心を引く書き方にする。
+
+---
+
+## 内容まとめ
+
+ここからが本文。トピックごとに見出しをつけて、ブログ記事のように書いていく。
+
+### （トピック名）
+
+**なぜこれが大事なのか** を1〜2文で伝えてから、具体的な内容に入る。
+
+やり方や手順がある場合は、順番がわかるように書く。
+ただし、箇条書きの羅列ではなく、流れが伝わる文章にする。
+
+講師が話した具体例やエピソードがあれば、そのまま盛り込む。
+実例があると読者の理解がグッと深まる。
+
+> ここぞというポイントは、引用ブロックで強調する
+
+（トピックは音声の内容に合わせて、必要な数だけ繰り返す）
+
+---
+
+## まとめ
+
+記事全体を振り返って、**一番伝えたいこと** を短くまとめる。
+
+読者の背中を押すような一言で締める。
+
+> 大事なのは「完璧にしてから動く」ことじゃなくて、「まず動き出す」こと。
+
+---
+
+## 今すぐやること
+
+ここが一番大事。読んだ人が **今日中に** 動けるくらい具体的に書く。
+
+1. 何を
+2. どうやって
+3. どこまでやるか
+
+を明確にする。3〜5個にまとめる。
+
+---
+
+# パターンB グループコンサル（グルコン）の場合
+
+グルコンの場合は、Q&Aを中心とした構成で書く。
+ただし箇条書きの羅列ではなく、**それぞれの相談を1本のミニ記事のように** 書く。
+情報量は多めに。省略しない。
+
+---
+
+## （音声の内容にふさわしいタイトル）
+
+冒頭で、このグルコンの全体テーマや雰囲気を1〜2文で伝える。
+
+---
+
+## 参加者と全体の流れ
+
+- どんなメンバーが集まっているか（わかる範囲で）
+- 全体としてどんなテーマや悩みが多かったか
+
+---
+
+## Q&A
+
+### Q1. （質問の内容を、読者が「あ、自分も気になる」と思えるような見出しにする）
+
+**相談の背景**
+
+質問者がどんな状況にいて、何に悩んでいるのかを詳しく書く。
+読者が「自分と似てる」と感じられるように、具体的に書く。
+
+**回答のポイント**
+
+回答者が伝えた内容を、読者が実践できるレベルで詳しく書く。
+
+考え方やマインドの話があれば、それも省略しない。
+具体的な手順やツール、数字の話があれば、すべて書く。
+たとえ話やエピソードがあれば、そのまま盛り込む。
+
+> 特に響くフレーズや、本質をついた一言は引用ブロックで強調する
+
+**この相談から学べること**
+
+この質問が自分に当てはまらなくても、他の人にも応用できるポイントを1〜2文で書く。
+
+**ネクストアクション**
+
+この相談をふまえて、読者がすぐ動けるアクションを具体的に書く。
+
+---
+
+### Q2.（次の質問。同じ構成で繰り返す）
+
+（Q&Aの数は、音声の内容に合わせて必要な数だけ書く。省略しない。）
+
+---
+
+## 全体を通して学べること
+
+グルコン全体をふまえて、参加者に共通するアドバイスや、根底にある大事な考え方をまとめる。
+
+ここも箇条書きではなく、文章として読者に伝わるように書く。
+
+---
+
+## 今すぐやること
+
+グルコンの内容をふまえて、読者が **今日中に** 動けるアクションを書く。
+
+1. 何を
+2. どうやって
+3. どこまでやるか
+
+を明確にする。3〜5個にまとめる。`;
+}
+
 // Helper function for exponential backoff retry
 async function retryWithExponentialBackoff<T>(
     fn: () => Promise<T>,
@@ -41,8 +225,8 @@ async function retryWithExponentialBackoff<T>(
 
 export async function summarizeVideoAudio(apiKey: string, audioFile: File, setStatus: (status: string) => void): Promise<string> {
     const genAI = new GoogleGenerativeAI(apiKey);
-    console.log("Initializing Gemini model: gemini-2.0-flash-exp");
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+    console.log("Initializing Gemini model: gemini-2.0-flash");
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
     setStatus("音声をアップロード中...");
 
@@ -63,69 +247,9 @@ export async function summarizeVideoAudio(apiKey: string, audioFile: File, setSt
     const base64Audio = await fileToGenerativePart(audioFile);
 
     // Get custom prompt from localStorage or use default
-    const defaultPrompt = `あなたはプロの編集者です。提供された音声データを分析し、以下の構成でサマリーを作成してください。
-音声のみの解析となるため、文脈からスライドの内容などを補完し、論理的に構成してください。
-以下執筆ルールに基づき、以下出力内容のみ出力するようにしてください。
-
-#【執筆ルール】
-「～と述べていました」という表現は避け、断定系で記述すること。
-思考プロセスや手順（How-to）を重視して具体的に書くこと。
-各セクションの間に <br> を入れて余白を作ること。
-
-#【出力内容】
-# 💡 【講義タイトルをここに入力】
-
-<br>
-<br>
-
----
-
-## 📌 0. この講義のゴール（要点3選）
-
-* **{学び1}**：
-* **{学び2}**：
-* **{学び3}**：
-
-<br>
-<br>
-
----
-
-## 📖 1. 実践ノウハウと具体的プロセス
-
-<br>
-
-### 🟦 \`01｜{トピック名}（開始時間 00:00~）\`
-
-**🧠 思考プロセス（Why & Logic）**
-* * <br>
-
-**🛠️ 具体的な手順・ノウハウ（How-to）**
-* **要点:** * **ステップ1:** * **ステップ2:** * **ステップ3:** <br>
-
-**✅ 具体的アクション**
-* [ ] 
-
-<br>
-<br>
-
----
-
-## 🚀 2. 講義直後に実行すべきアクション
-
-<br>
-
-* [ ] **{アクション1}**：
-* [ ] **{アクション2}**：
-* [ ] **{アクション3}**：
-
-<br>
-
----`;
-
     const prompt = typeof window !== 'undefined'
-        ? localStorage.getItem("custom_prompt") || defaultPrompt
-        : defaultPrompt;
+        ? localStorage.getItem("custom_prompt") || getDefaultPrompt()
+        : getDefaultPrompt();
 
     setStatus("Gemini APIにリクエスト送信中...");
 
@@ -156,7 +280,7 @@ export async function getAvailableModels(apiKey: string): Promise<string[]> {
         // Let's rely on a direct fetch to the API endpoint for debugging if SDK fails, or just return the standard set to test.
         // Actually, let's just create a list of candidates to test connectivity.
 
-        const candidates = ["gemini-2.0-flash-exp", "gemini-1.5-flash", "gemini-1.5-flash-001", "gemini-1.5-pro", "gemini-1.5-pro-001"];
+        const candidates = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-001", "gemini-1.5-pro", "gemini-1.5-pro-001"];
         const workingModels = [];
 
         for (const modelName of candidates) {
@@ -193,6 +317,89 @@ async function fileToGenerativePart(file: File) {
     };
 }
 
+// Summarize audio split into chunks (for long videos > 10min)
+export async function summarizeAudioChunks(
+    apiKey: string,
+    chunks: { base64: string; mimeType: string; startTime: number; duration: number }[],
+    setStatus: (status: string) => void
+): Promise<string> {
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+
+    const chunkSummaries: string[] = [];
+
+    for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        const startMin = Math.floor(chunk.startTime / 60);
+        const endMin = Math.floor((chunk.startTime + chunk.duration) / 60);
+
+        setStatus(`チャンク ${i + 1}/${chunks.length} を分析中（${startMin}分〜${endMin}分）...`);
+
+        const chunkPrompt = `以下の音声は録音の一部分です（${startMin}分〜${endMin}分）。
+この部分で実際に話されている内容を、できるだけ詳しく・省略せずに書き起こしてください。
+話されていないことは書かないでください。
+
+以下を漏れなく拾ってください。
+- 話されているトピックと、そのポイント
+- 具体的なやり方、手順、アドバイス
+- 質疑応答があれば、質問の背景と回答の内容を詳しく
+- エピソードやたとえ話、具体例
+- 響くフレーズや名言的な一言
+- 大事な考え方やマインドの話`;
+
+        const audioPart = {
+            inlineData: {
+                data: chunk.base64,
+                mimeType: chunk.mimeType,
+            },
+        };
+
+        const result = await retryWithExponentialBackoff(
+            () => model.generateContent([chunkPrompt, audioPart]),
+            3,
+            (attempt, waitTime) => {
+                setStatus(`チャンク ${i + 1}/${chunks.length}: レート制限。${waitTime}秒後に再試行 (${attempt}/3)...`);
+            }
+        );
+
+        const response = await result.response;
+        chunkSummaries.push(`【${startMin}分〜${endMin}分】\n${response.text()}`);
+    }
+
+    // Integrate all chunk summaries into a final summary
+    setStatus("全チャンクの要約を統合中...");
+
+    const customPrompt = typeof window !== 'undefined'
+        ? localStorage.getItem("custom_prompt") || getDefaultPrompt()
+        : getDefaultPrompt();
+
+    const integrationPrompt = `以下は、長時間の音声を時間ごとに区切って書き起こしたものです。
+これらを統合して、**ひとつの完成されたブログ記事** を作成してください。
+
+- 内容の重複は整理し、時系列を考慮して自然な流れにまとめる
+- 音声で実際に話された内容だけを使い、推測や補足は加えない
+- 読者が最後まで読めて、動画を見なくても行動できる記事にする
+
+--- 各パートの書き起こし ---
+${chunkSummaries.join('\n\n---\n\n')}
+--- ここまで ---
+
+上記の内容をもとに、以下のフォーマットでブログ記事を作成してください。
+
+${customPrompt}`;
+
+    const integrationResult = await retryWithExponentialBackoff(
+        () => model.generateContent(integrationPrompt),
+        3,
+        (attempt, waitTime) => {
+            setStatus(`統合処理: レート制限。${waitTime}秒後に再試行 (${attempt}/3)...`);
+        }
+    );
+
+    const integrationResponse = await integrationResult.response;
+    return integrationResponse.text();
+}
+
 // Summarize audio from base64 string (for YouTube)
 export async function summarizeAudioFromBase64(
     apiKey: string,
@@ -201,72 +408,12 @@ export async function summarizeAudioFromBase64(
     setStatus: (status: string) => void
 ): Promise<string> {
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
     // Get custom prompt from localStorage or use default
-    const defaultPrompt = `あなたはプロの編集者です。提供された音声データを分析し、以下の構成でサマリーを作成してください。
-音声のみの解析となるため、文脈からスライドの内容などを補完し、論理的に構成してください。
-以下執筆ルールに基づき、以下出力内容のみ出力するようにしてください。
-
-#【執筆ルール】
-「～と述べていました」という表現は避け、断定系で記述すること。
-思考プロセスや手順（How-to）を重視して具体的に書くこと。
-各セクションの間に <br> を入れて余白を作ること。
-
-#【出力内容】
-# 💡 【講義タイトルをここに入力】
-
-<br>
-<br>
-
----
-
-## 📌 0. この講義のゴール（要点3選）
-
-* **{学び1}**：
-* **{学び2}**：
-* **{学び3}**：
-
-<br>
-<br>
-
----
-
-## 📖 1. 実践ノウハウと具体的プロセス
-
-<br>
-
-### 🟦 \`01｜{トピック名}（開始時間 00:00~）\`
-
-**🧠 思考プロセス（Why & Logic）**
-* * <br>
-
-**🛠️ 具体的な手順・ノウハウ（How-to）**
-* **要点:** * **ステップ1:** * **ステップ2:** * **ステップ3:** <br>
-
-**✅ 具体的アクション**
-* [ ]
-
-<br>
-<br>
-
----
-
-## 🚀 2. 講義直後に実行すべきアクション
-
-<br>
-
-* [ ] **{アクション1}**：
-* [ ] **{アクション2}**：
-* [ ] **{アクション3}**：
-
-<br>
-
----`;
-
     const prompt = typeof window !== 'undefined'
-        ? localStorage.getItem("custom_prompt") || defaultPrompt
-        : defaultPrompt;
+        ? localStorage.getItem("custom_prompt") || getDefaultPrompt()
+        : getDefaultPrompt();
 
     setStatus("Gemini APIにリクエスト送信中...");
 

@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { Upload, FolderOpen, Loader2, CheckCircle, XCircle, ChevronDown, ChevronRight, Download, FileVideo } from "lucide-react";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile, toBlobURL } from "@ffmpeg/util";
-import { summarizeVideoAudio } from "../lib/gemini";
+import { summarizeVideoAudio, summarizeAudioChunks } from "../lib/gemini";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
@@ -92,20 +92,94 @@ export default function BatchVideoArea({ apiKey }: BatchVideoAreaProps) {
             const ffmpeg = ffmpegRef.current;
             if (!ffmpeg) throw new Error("FFmpeg not initialized");
 
+            // Use job-specific filenames to avoid conflicts in batch mode
+            const inputFile = `input_${job.id}.mp4`;
+            const audioFile = `audio_${job.id}.mp3`;
+
             updateJob(job.id, { progress: 20, statusMessage: "音声を抽出中..." });
-            await ffmpeg.writeFile('input.mp4', await fetchFile(job.file));
-            await ffmpeg.exec(['-i', 'input.mp4', '-vn', '-acodec', 'libmp3lame', 'output.mp3']);
+            await ffmpeg.writeFile(inputFile, await fetchFile(job.file));
+            await ffmpeg.exec([
+                '-i', inputFile,
+                '-vn',
+                '-ac', '1',
+                '-ar', '16000',
+                '-b:a', '64k',
+                '-f', 'mp3',
+                audioFile
+            ]);
 
-            updateJob(job.id, { progress: 40, statusMessage: "音声ファイルを読み込み中..." });
-            const data = await ffmpeg.readFile('output.mp3');
+            // Clean up input file to free WASM memory
+            try { await ffmpeg.deleteFile(inputFile); } catch { /* ignore */ }
+
+            updateJob(job.id, { progress: 35, statusMessage: "音声ファイルを読み込み中..." });
+            const fullData = await ffmpeg.readFile(audioFile);
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const audioBlob = new Blob([data as any], { type: 'audio/mp3' });
-            const audioFile = new File([audioBlob], "audio.mp3", { type: "audio/mp3" });
+            const audioBlob = new Blob([fullData as any], { type: 'audio/mp3' });
 
-            updateJob(job.id, { progress: 60, statusMessage: "Gemini AIで分析中..." });
-            const summary = await summarizeVideoAudio(apiKey, audioFile, (s) => {
-                updateJob(job.id, { statusMessage: s });
-            });
+            // Estimate duration: 64kbps = 8KB/s
+            const estimatedDuration = audioBlob.size / 8000;
+            const CHUNK_SECONDS = 600;
+
+            let summary: string;
+
+            if (estimatedDuration <= CHUNK_SECONDS) {
+                // Short video — single file processing
+                // Clean up audio file from WASM FS
+                try { await ffmpeg.deleteFile(audioFile); } catch { /* ignore */ }
+
+                const audioFileObj = new File([audioBlob], "audio.mp3", { type: "audio/mp3" });
+                updateJob(job.id, { progress: 60, statusMessage: "Gemini AIで分析中..." });
+                summary = await summarizeVideoAudio(apiKey, audioFileObj, (s) => {
+                    updateJob(job.id, { statusMessage: s });
+                });
+            } else {
+                // Long video — chunk processing
+                const numChunks = Math.ceil(estimatedDuration / CHUNK_SECONDS);
+                updateJob(job.id, { progress: 40, statusMessage: `${numChunks}チャンクに分割中...` });
+
+                const chunks: { base64: string; mimeType: string; startTime: number; duration: number }[] = [];
+
+                for (let i = 0; i < numChunks; i++) {
+                    const startTime = i * CHUNK_SECONDS;
+                    const chunkDuration = Math.min(CHUNK_SECONDS, estimatedDuration - startTime);
+                    const chunkFile = `chunk_${job.id}_${i}.mp3`;
+
+                    await ffmpeg.exec([
+                        '-ss', String(startTime),
+                        '-t', String(CHUNK_SECONDS),
+                        '-i', audioFile,
+                        '-c', 'copy',
+                        chunkFile
+                    ]);
+
+                    const chunkData = await ffmpeg.readFile(chunkFile);
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const chunkBlob = new Blob([chunkData as any], { type: 'audio/mp3' });
+
+                    // Clean up chunk file from WASM FS
+                    try { await ffmpeg.deleteFile(chunkFile); } catch { /* ignore */ }
+
+                    const chunkBase64 = await new Promise<string>((resolve) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+                        reader.readAsDataURL(chunkBlob);
+                    });
+
+                    chunks.push({ base64: chunkBase64, mimeType: 'audio/mp3', startTime, duration: chunkDuration });
+                    updateJob(job.id, {
+                        progress: 40 + Math.round((i + 1) / numChunks * 20),
+                        statusMessage: `チャンク ${i + 1}/${numChunks} を抽出完了`
+                    });
+                }
+
+                // Clean up audio file from WASM FS
+                try { await ffmpeg.deleteFile(audioFile); } catch { /* ignore */ }
+
+                updateJob(job.id, { progress: 60, statusMessage: `Gemini AIで${numChunks}チャンクを分析中...` });
+                summary = await summarizeAudioChunks(apiKey, chunks, (s) => {
+                    updateJob(job.id, { statusMessage: s });
+                });
+            }
 
             updateJob(job.id, {
                 status: "completed",
@@ -155,21 +229,12 @@ export default function BatchVideoArea({ apiKey }: BatchVideoAreaProps) {
 
         setIsProcessing(true);
 
-        // 同時処理数を3に制限
-        const concurrency = 3;
+        // WASM FFmpegはシングルスレッドなので、1件ずつ順番に処理する
+        // （並列にするとファイルが競合してエラーになる）
         const waitingJobs = jobs.filter(j => j.status === "waiting");
 
-        // シンプルな実装：待機中のジョブを純粋に処理する（既存のループロジックだとstate更新と同期しないため修正）
-        // ここでは単純化のため、未完了のものを順次処理する形にします
-        // Note: リアクティブなキュー処理は複雑になるため、簡易的なバッチ処理実装
-
-        // 実際の処理はmapで行うが、concurrency制御はPromise.allなどで簡易的に
-        // ここでは簡易的に、waiting状態のものを全て処理対象とする
-        // ※厳密な同時実行制御はこのコードのスコープ外だが、簡易的に実装
-
-        for (let i = 0; i < waitingJobs.length; i += concurrency) {
-            const batch = waitingJobs.slice(i, i + concurrency);
-            await Promise.all(batch.map(job => processVideo(job)));
+        for (const job of waitingJobs) {
+            await processVideo(job);
         }
 
         setIsProcessing(false);

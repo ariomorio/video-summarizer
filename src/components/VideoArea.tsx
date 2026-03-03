@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { Upload, FileVideo, Loader2, X, Download, Zap, Server } from "lucide-react";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile, toBlobURL } from "@ffmpeg/util";
-import { summarizeVideoAudio } from "../lib/gemini";
+import { summarizeVideoAudio, summarizeAudioChunks } from "../lib/gemini";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface VideoAreaProps {
@@ -100,8 +100,13 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
         };
     };
 
-    // Client-side audio extraction (fallback)
-    const extractAudioClient = async (videoFile: File): Promise<{ audio: string; mimeType: string; needsFileAPI: boolean }> => {
+    // Client-side audio extraction (fallback) — supports chunk splitting for long videos
+    const extractAudioClient = async (videoFile: File): Promise<{
+        audio: string;
+        mimeType: string;
+        needsFileAPI: boolean;
+        chunks?: { base64: string; mimeType: string; startTime: number; duration: number }[];
+    }> => {
         await loadClientFFmpeg();
         const ffmpeg = ffmpegRef.current;
         if (!ffmpeg) throw new Error("FFmpeg not initialized");
@@ -109,7 +114,7 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
         setStatus("音声を抽出中（ブラウザ版）...");
         await ffmpeg.writeFile('input.mp4', await fetchFile(videoFile));
 
-        // Use aggressive compression for speech
+        // Extract full audio with aggressive compression for speech
         await ffmpeg.exec([
             '-i', 'input.mp4',
             '-vn',
@@ -117,37 +122,108 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
             '-ar', '16000',       // 16kHz sample rate
             '-b:a', '64k',        // 64kbps bitrate
             '-f', 'mp3',
-            'output.mp3'
+            'full_audio.mp3'
         ]);
 
-        setStatus("音声ファイルを読み込み中...");
-        const data = await ffmpeg.readFile('output.mp3');
+        // Get duration via ffprobe-like approach: extract to a known format and estimate from size
+        // 64kbps = 8KB/s, so duration ≈ fileSize / 8000
+        const fullAudioData = await ffmpeg.readFile('full_audio.mp3');
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const extractedAudioBlob = new Blob([data as any], { type: 'audio/mp3' });
-        setAudioBlob(extractedAudioBlob);
+        const fullAudioBlob = new Blob([fullAudioData as any], { type: 'audio/mp3' });
+        const estimatedDuration = fullAudioBlob.size / 8000; // 64kbps = 8KB/s
 
-        // Convert to base64
-        const base64 = await new Promise<string>((resolve) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
-            reader.readAsDataURL(extractedAudioBlob);
-        });
+        const CHUNK_SECONDS = 600; // 10 minutes
 
-        const fileSizeMB = extractedAudioBlob.size / (1024 * 1024);
-        setCompressionInfo(`圧縮後: ${fileSizeMB.toFixed(2)}MB`);
+        if (estimatedDuration <= CHUNK_SECONDS) {
+            // Short video — return as single file (existing flow)
+            setAudioBlob(fullAudioBlob);
+
+            const base64 = await new Promise<string>((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+                reader.readAsDataURL(fullAudioBlob);
+            });
+
+            const fileSizeMB = fullAudioBlob.size / (1024 * 1024);
+            setCompressionInfo(`圧縮後: ${fileSizeMB.toFixed(2)}MB`);
+
+            return {
+                audio: base64,
+                mimeType: 'audio/mp3',
+                needsFileAPI: fileSizeMB > 15,
+            };
+        }
+
+        // Long video — split into 10-minute chunks
+        const numChunks = Math.ceil(estimatedDuration / CHUNK_SECONDS);
+        setStatus(`長時間動画を検出（約${Math.round(estimatedDuration / 60)}分）。${numChunks}チャンクに分割中...`);
+        setAudioBlob(fullAudioBlob);
+
+        const chunks: { base64: string; mimeType: string; startTime: number; duration: number }[] = [];
+
+        for (let i = 0; i < numChunks; i++) {
+            const startTime = i * CHUNK_SECONDS;
+            const chunkDuration = Math.min(CHUNK_SECONDS, estimatedDuration - startTime);
+            const chunkFile = `chunk_${i}.mp3`;
+
+            setStatus(`チャンク ${i + 1}/${numChunks} を抽出中（${Math.floor(startTime / 60)}分〜${Math.floor((startTime + chunkDuration) / 60)}分）...`);
+
+            await ffmpeg.exec([
+                '-ss', String(startTime),
+                '-t', String(CHUNK_SECONDS),
+                '-i', 'full_audio.mp3',
+                '-c', 'copy',
+                chunkFile
+            ]);
+
+            const chunkData = await ffmpeg.readFile(chunkFile);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const chunkBlob = new Blob([chunkData as any], { type: 'audio/mp3' });
+
+            const chunkBase64 = await new Promise<string>((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+                reader.readAsDataURL(chunkBlob);
+            });
+
+            chunks.push({
+                base64: chunkBase64,
+                mimeType: 'audio/mp3',
+                startTime,
+                duration: chunkDuration,
+            });
+        }
+
+        const totalMB = fullAudioBlob.size / (1024 * 1024);
+        setCompressionInfo(`圧縮後: ${totalMB.toFixed(2)}MB（${numChunks}チャンク）`);
 
         return {
-            audio: base64,
+            audio: '', // not used in chunk mode
             mimeType: 'audio/mp3',
-            needsFileAPI: fileSizeMB > 15,
+            needsFileAPI: false,
+            chunks,
         };
     };
 
-    // Summarize using Gemini (inline data or File API)
-    const summarizeWithGemini = async (audio: string, mimeType: string, needsFileAPI: boolean): Promise<string> => {
+    // Summarize using Gemini (inline data, File API, or chunked)
+    const summarizeWithGemini = async (
+        audio: string,
+        mimeType: string,
+        needsFileAPI: boolean,
+        chunks?: { base64: string; mimeType: string; startTime: number; duration: number }[]
+    ): Promise<string> => {
+        // Chunk mode for long videos
+        if (chunks && chunks.length > 0) {
+            setStatus(`Gemini AIでチャンク分析中（${chunks.length}チャンク）...`);
+            return await summarizeAudioChunks(apiKey, chunks, (s) => setStatus(s));
+        }
+
         if (needsFileAPI) {
             // Use Gemini File API for large files
             setStatus("Gemini File APIで分析中（大容量ファイル対応）...");
+
+            // Send the same prompt used client-side
+            const customPrompt = localStorage.getItem("custom_prompt") || undefined;
 
             const response = await fetch('/api/gemini-file', {
                 method: 'POST',
@@ -156,6 +232,7 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
                     audio,
                     mimeType,
                     apiKey,
+                    prompt: customPrompt,
                 }),
             });
 
@@ -189,10 +266,20 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
         setCompressionInfo("");
 
         try {
-            let audioData: { audio: string; mimeType: string; needsFileAPI: boolean };
+            let audioData: {
+                audio: string;
+                mimeType: string;
+                needsFileAPI: boolean;
+                chunks?: { base64: string; mimeType: string; startTime: number; duration: number }[];
+            };
+
+            // Force client-side for files > 4MB
+            // Vercel serverless has strict body size limits (4.5MB Hobby / 50MB Pro)
+            // Trying server with large files wastes time and causes "Failed to fetch"
+            const forceClient = file.size > 4 * 1024 * 1024;
 
             // Try server-side first (faster), fallback to client
-            if (processingMode === 'auto' || processingMode === 'server') {
+            if (!forceClient && (processingMode === 'auto' || processingMode === 'server')) {
                 try {
                     setProgress(10);
                     audioData = await extractAudioServer(file);
@@ -204,19 +291,24 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
                         audioData = await extractAudioClient(file);
                         setProgress(50);
 
-                        // Save audio blob for download
-                        const binaryString = atob(audioData.audio);
-                        const bytes = new Uint8Array(binaryString.length);
-                        for (let i = 0; i < binaryString.length; i++) {
-                            bytes[i] = binaryString.charCodeAt(i);
+                        // Save audio blob for download (only for non-chunk mode)
+                        if (!audioData.chunks && audioData.audio) {
+                            const binaryString = atob(audioData.audio);
+                            const bytes = new Uint8Array(binaryString.length);
+                            for (let i = 0; i < binaryString.length; i++) {
+                                bytes[i] = binaryString.charCodeAt(i);
+                            }
+                            setAudioBlob(new Blob([bytes], { type: 'audio/mp3' }));
                         }
-                        setAudioBlob(new Blob([bytes], { type: 'audio/mp3' }));
                     } else {
                         throw error;
                     }
                 }
             } else {
                 setProgress(10);
+                if (forceClient) {
+                    setStatus("大容量ファイル（500MB+）: ブラウザで処理中...");
+                }
                 audioData = await extractAudioClient(file);
                 setProgress(50);
             }
@@ -226,7 +318,8 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
             const summary = await summarizeWithGemini(
                 audioData.audio,
                 audioData.mimeType,
-                audioData.needsFileAPI
+                audioData.needsFileAPI,
+                audioData.chunks
             );
 
             onSummaryGenerated(summary);
