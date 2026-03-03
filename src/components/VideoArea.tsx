@@ -27,8 +27,6 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const loadClientFFmpeg = async () => {
-        const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-
         if (!ffmpegRef.current) {
             ffmpegRef.current = new FFmpeg();
         }
@@ -38,8 +36,9 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
 
         try {
             setStatus("FFmpegを読み込み中（ブラウザ版）...");
-            const coreURL = await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript');
-            const wasmURL = await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm');
+            // Load from local public directory (no external CDN dependency)
+            const coreURL = await toBlobURL('/ffmpeg/ffmpeg-core.js', 'text/javascript');
+            const wasmURL = await toBlobURL('/ffmpeg/ffmpeg-core.wasm', 'application/wasm');
             await ffmpeg.load({ coreURL, wasmURL });
         } catch (e) {
             console.error('FFmpeg load error:', e);

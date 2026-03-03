@@ -4,11 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node scripts/copy-ffmpeg.js",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
+    "@ffmpeg/core": "^0.12.6",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
     "@google/generative-ai": "^0.24.1",

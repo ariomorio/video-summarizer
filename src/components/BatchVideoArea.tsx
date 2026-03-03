@@ -33,8 +33,6 @@ export default function BatchVideoArea({ apiKey }: BatchVideoAreaProps) {
     const ffmpegRef = useRef<FFmpeg | null>(null);
 
     const load = async () => {
-        const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-
         if (!ffmpegRef.current) {
             ffmpegRef.current = new FFmpeg();
         }
@@ -42,9 +40,10 @@ export default function BatchVideoArea({ apiKey }: BatchVideoAreaProps) {
 
         if (ffmpeg.loaded) return;
 
+        // Load from local public directory (no external CDN dependency)
         await ffmpeg.load({
-            coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-            wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+            coreURL: await toBlobURL('/ffmpeg/ffmpeg-core.js', 'text/javascript'),
+            wasmURL: await toBlobURL('/ffmpeg/ffmpeg-core.wasm', 'application/wasm'),
         });
     };
 
