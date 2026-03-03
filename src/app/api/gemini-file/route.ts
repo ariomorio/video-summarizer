@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
 
         // Generate content using the uploaded file
         const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
         const fallbackPrompt = 'この音声の内容を、ブログ記事のようにわかりやすく詳しくまとめてください。読者が最後まで読めて、動画を見なくても行動できる記事にしてください。';
 

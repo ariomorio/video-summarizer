@@ -225,8 +225,8 @@ async function retryWithExponentialBackoff<T>(
 
 export async function summarizeVideoAudio(apiKey: string, audioFile: File, setStatus: (status: string) => void): Promise<string> {
     const genAI = new GoogleGenerativeAI(apiKey);
-    console.log("Initializing Gemini model: gemini-2.0-flash");
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    console.log("Initializing Gemini model: gemini-2.5-flash");
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     setStatus("音声をアップロード中...");
 
@@ -280,7 +280,7 @@ export async function getAvailableModels(apiKey: string): Promise<string[]> {
         // Let's rely on a direct fetch to the API endpoint for debugging if SDK fails, or just return the standard set to test.
         // Actually, let's just create a list of candidates to test connectivity.
 
-        const candidates = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-001", "gemini-1.5-pro", "gemini-1.5-pro-001"];
+        const candidates = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-flash-001", "gemini-1.5-pro", "gemini-1.5-pro-001"];
         const workingModels = [];
 
         for (const modelName of candidates) {
@@ -324,7 +324,7 @@ export async function summarizeAudioChunks(
     setStatus: (status: string) => void
 ): Promise<string> {
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const chunkSummaries: string[] = [];
 
@@ -408,7 +408,7 @@ export async function summarizeAudioFromBase64(
     setStatus: (status: string) => void
 ): Promise<string> {
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     // Get custom prompt from localStorage or use default
     const prompt = typeof window !== 'undefined'
