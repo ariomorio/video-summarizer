@@ -11,10 +11,8 @@ const nextConfig: NextConfig = {
             key: 'Cross-Origin-Opener-Policy',
             value: 'same-origin',
           },
-          {
-            key: 'Cross-Origin-Embedder-Policy',
-            value: 'credentialless',
-          },
+          // COEP removed: UMD FFmpeg doesn't need SharedArrayBuffer,
+          // and COEP blocks toBlobURL/fetch for WASM loading
           {
             key: 'X-Content-Type-Options',
             value: 'nosniff',
