@@ -36,11 +36,15 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
 
         if (ffmpeg.loaded) return;
 
-        setStatus("FFmpegを読み込み中（ブラウザ版）...");
-        await ffmpeg.load({
-            coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-            wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-        });
+        try {
+            setStatus("FFmpegを読み込み中（ブラウザ版）...");
+            const coreURL = await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript');
+            const wasmURL = await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm');
+            await ffmpeg.load({ coreURL, wasmURL });
+        } catch (e) {
+            console.error('FFmpeg load error:', e);
+            throw new Error(`FFmpeg読み込み失敗: ${e instanceof Error ? e.message : String(e)}`);
+        }
     };
 
     useEffect(() => {
@@ -330,8 +334,11 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
             saveToHistory(file.name, summary);
 
         } catch (error) {
-            console.error(error);
-            setStatus("エラー: " + (error as Error).message);
+            console.error('processVideo error:', error);
+            const msg = error instanceof Error ? error.message
+                : typeof error === 'string' ? error
+                : JSON.stringify(error);
+            setStatus("エラー: " + (msg || '不明なエラーが発生しました'));
             setHasError(true);
         } finally {
             setIsProcessing(false);
