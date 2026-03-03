@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Upload, FileVideo, Loader2, X, Download, Zap, Server } from "lucide-react";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
-import { fetchFile, toBlobURL } from "@ffmpeg/util";
+import { fetchFile } from "@ffmpeg/util";
 import { summarizeVideoAudio, summarizeAudioChunks } from "../lib/gemini";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -35,10 +35,19 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
         if (ffmpeg.loaded) return;
 
         try {
-            setStatus("FFmpegを読み込み中（ブラウザ版）...");
-            // Load from local public directory via toBlobURL (same-origin, COEP removed so fetch works)
-            const coreURL = await toBlobURL('/ffmpeg/ffmpeg-core.js', 'text/javascript');
-            const wasmURL = await toBlobURL('/ffmpeg/ffmpeg-core.wasm', 'application/wasm');
+            setStatus("ffmpeg-core.js をダウンロード中...");
+            const jsResp = await fetch('/ffmpeg/ffmpeg-core.js');
+            if (!jsResp.ok) throw new Error(`JS fetch failed: ${jsResp.status} ${jsResp.statusText}`);
+            const jsBlob = new Blob([await jsResp.arrayBuffer()], { type: 'text/javascript' });
+            const coreURL = URL.createObjectURL(jsBlob);
+
+            setStatus("ffmpeg-core.wasm をダウンロード中（30MB）...");
+            const wasmResp = await fetch('/ffmpeg/ffmpeg-core.wasm');
+            if (!wasmResp.ok) throw new Error(`WASM fetch failed: ${wasmResp.status} ${wasmResp.statusText}`);
+            const wasmBlob = new Blob([await wasmResp.arrayBuffer()], { type: 'application/wasm' });
+            const wasmURL = URL.createObjectURL(wasmBlob);
+
+            setStatus("FFmpegを初期化中...");
             await ffmpeg.load({ coreURL, wasmURL });
         } catch (e) {
             console.error('FFmpeg load error:', e);
