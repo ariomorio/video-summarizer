@@ -2,76 +2,17 @@
 
 import { useState, useEffect } from "react";
 import { RotateCcw, Save } from "lucide-react";
-
-const DEFAULT_PROMPT = `あなたはプロの編集者です。提供された音声データを分析し、以下の構成でサマリーを作成してください。
-音声のみの解析となるため、文脈からスライドの内容などを補完し、論理的に構成してください。
-以下執筆ルールに基づき、以下出力内容のみ出力するようにしてください。
-
-#【執筆ルール】
-「〜と述べていました」という表現は避け、断定系で記述すること。
-思考プロセスや手順（How-to）を重視して具体的に書くこと。
-各セクションの間に <br> を入れて余白を作ること。
-
-#【出力内容】
-# 💡 【講義タイトルをここに入力】
-
-<br>
-<br>
-
----
-
-## 📌 0. この講義のゴール（要点3選）
-
-* **{学び1}**：
-* **{学び2}**：
-* **{学び3}**：
-
-<br>
-<br>
-
----
-
-## 📖 1. 実践ノウハウと具体的プロセス
-
-<br>
-
-### 🟦 \`01｜{トピック名}（開始時間 00:00~）\`
-
-**🧠 思考プロセス（Why & Logic）**
-* * <br>
-
-**🛠️ 具体的な手順・ノウハウ（How-to）**
-* **要点:** * **ステップ1:** * **ステップ2:** * **ステップ3:** <br>
-
-**✅ 具体的アクション**
-* [ ] 
-
-<br>
-<br>
-
----
-
-## 🚀 2. 講義直後に実行すべきアクション
-
-<br>
-
-* [ ] **{アクション1}**：
-* [ ] **{アクション2}**：
-* [ ] **{アクション3}**：
-
-<br>
-
----`;
+import { getDefaultPrompt } from "../lib/gemini";
 
 export default function PromptEditor() {
-    const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
+    const [prompt, setPrompt] = useState("");
     const [saved, setSaved] = useState(false);
+    const [loaded, setLoaded] = useState(false);
 
     useEffect(() => {
         const savedPrompt = localStorage.getItem("custom_prompt");
-        if (savedPrompt) {
-            setPrompt(savedPrompt);
-        }
+        setPrompt(savedPrompt || getDefaultPrompt());
+        setLoaded(true);
     }, []);
 
     const handleSave = () => {
@@ -82,12 +23,15 @@ export default function PromptEditor() {
 
     const handleReset = () => {
         if (confirm("デフォルトプロンプトに戻しますか？")) {
-            setPrompt(DEFAULT_PROMPT);
-            localStorage.setItem("custom_prompt", DEFAULT_PROMPT);
+            const defaultPrompt = getDefaultPrompt();
+            setPrompt(defaultPrompt);
+            localStorage.removeItem("custom_prompt");
             setSaved(true);
             setTimeout(() => setSaved(false), 2000);
         }
     };
+
+    if (!loaded) return null;
 
     return (
         <div className="space-y-4">
@@ -121,13 +65,13 @@ export default function PromptEditor() {
 
             <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
                 <p className="text-xs text-blue-800">
-                    <strong>💡 ヒント:</strong> プロンプトには以下のような要素を含めることができます：
+                    <strong>ヒント:</strong> プロンプトには以下のような要素を含めることができます：
                 </p>
                 <ul className="text-xs text-blue-700 mt-2 space-y-1 ml-4 list-disc">
-                    <li>出力形式の指定（箇条書き、段落形式など）</li>
+                    <li>出力形式の指定（ブログ風、箇条書き、Q&A形式など）</li>
                     <li>含めてほしい情報（要点、アクションアイテムなど）</li>
-                    <li>トーンや文体の指定（フォーマル、カジュアルなど）</li>
-                    <li>言語の指定（日本語、英語など）</li>
+                    <li>トーンや文体の指定（語りかけ、フォーマルなど）</li>
+                    <li>講義型 / グルコン型の判定ルール</li>
                 </ul>
             </div>
         </div>

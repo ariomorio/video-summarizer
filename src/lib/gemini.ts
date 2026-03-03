@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // Default prompt — blog-style writing that people actually read to the end
-function getDefaultPrompt(): string {
+export function getDefaultPrompt(): string {
     return `あなたは「読まれるブログ記事」を書くプロのライターです。
 提供された音声を聞いて、その内容を **ブログ記事** として書き起こしてください。
 
