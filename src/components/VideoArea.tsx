@@ -144,7 +144,7 @@ export default function VideoArea({ apiKey, onSummaryGenerated }: VideoAreaProps
         const fullAudioBlob = new Blob([fullAudioData as any], { type: 'audio/mp3' });
         const estimatedDuration = fullAudioBlob.size / 8000; // 64kbps = 8KB/s
 
-        const CHUNK_SECONDS = 600; // 10 minutes
+        const CHUNK_SECONDS = 1200; // 20 minutes
 
         if (estimatedDuration <= CHUNK_SECONDS) {
             // Short video — return as single file (existing flow)
